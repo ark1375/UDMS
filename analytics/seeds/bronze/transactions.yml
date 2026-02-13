@@ -1,0 +1,24 @@
+version: 2
+
+seeds:
+  - name: transactions
+    config:
+      quote_columns: true
+      column_types:
+        "Date": varchar
+        "Time": varchar
+        "Booking ID": varchar
+        "Booking Status": varchar
+        "Customer ID": varchar
+        "Vehicle Type": varchar
+        "Cancelled Rides by Customer": varchar
+        "Reason for cancelling by Customer": varchar
+        "Cancelled Rides by Driver": varchar
+        "Driver Cancellation Reason": varchar
+        "Incomplete Rides": varchar
+        "Incomplete Rides Reason": varchar
+        "Booking Value": varchar
+        "Ride Distance": varchar
+        "Driver Ratings": varchar
+        "Customer Rating": varchar
+        "Payment Method": varchar

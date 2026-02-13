@@ -1,0 +1,42 @@
+version: 2
+
+models:
+  - name: TransactionFact
+    description: "Silver fact table for transactions; typed, cleaned, and with consolidated undone-reason logic."
+    columns:
+      - name: transaction_id
+        description: "Composite primary key: CustomerID|BookingID"
+        tests:
+          - not_null
+          - unique
+
+      - name: customer_id
+        tests: [not_null]
+
+      - name: booking_id
+        tests: [not_null]
+
+      - name: trip_ts
+        description: "Timestamp built from Date + Time"
+        tests: [not_null]
+
+      - name: booking_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - "No Driver Found"
+                  - "Incomplete"
+                  - "Completed"
+                  - "Cancelled by Driver"
+                  - "Cancelled by Customer"
+
+      - name: trip_undone_reason
+        description: "Reason derived from the correct source column based on booking_status."
+
+      - name: booking_value
+        description: "Booking value as double; 'null' strings converted to NULL."
+
+      - name: ride_distance
+        description: "Ride distance as double; 'null' strings converted to NULL."
