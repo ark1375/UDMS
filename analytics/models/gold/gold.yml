@@ -1,0 +1,31 @@
+version: 2
+
+models:
+  - name: Travels
+    description: "Gold table for completed rides."
+    columns:
+      - name: transaction_id
+        tests: [not_null, unique]
+
+      - name: booking_value
+        tests: [not_null]
+
+      - name: payment_method
+        tests: [not_null]
+
+  - name: Requests
+    description: "Gold table for uncompleted rides (cancelled, incomplete, no driver found)."
+    columns:
+      - name: transaction_id
+        tests: [not_null, unique]
+
+      - name: booking_status
+        tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - "No Driver Found"
+                  - "Incomplete"
+                  - "Cancelled by Driver"
+                  - "Cancelled by Customer"
