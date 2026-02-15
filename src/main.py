@@ -28,12 +28,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Analytics CRUD API", version="1.0.0", lifespan=lifespan)
-
-    api = FastAPI()
-    api.include_router(transactions_router)
-
-    # base_url/api/v1/*
-    app.mount("/api/v1", api)
+    app.include_router(transactions_router, prefix="/api/v1")
     return app
 
 

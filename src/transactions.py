@@ -43,7 +43,7 @@ def create_transaction(payload: TransactionCreate, request: Request):
     settings = request.app.state.settings
 
     booking_id = _make_booking_id()
-    transaction_fact_pk = _make_pk(payload.customer_id, booking_id)
+    transaction_id = _make_pk(payload.customer_id, booking_id)
 
     booking_value = float(payload.ride_distance) * float(settings.rate_per_distance)
 
@@ -57,13 +57,11 @@ def create_transaction(payload: TransactionCreate, request: Request):
 
     conn = db.get_connection()
 
-    # Insert into SILVER table
-    # (Assumes these columns exist in silver.transaction_fact)
     try:
         conn.execute(
             """
-            INSERT INTO silver.transaction_fact (
-                transaction_fact_pk,
+            INSERT INTO silver.TransactionFact (
+                transaction_id,
                 customer_id,
                 booking_id,
                 trip_ts,
@@ -79,7 +77,7 @@ def create_transaction(payload: TransactionCreate, request: Request):
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
-                transaction_fact_pk,
+                transaction_id,
                 payload.customer_id,
                 booking_id,
                 payload.trip_ts,
@@ -100,21 +98,21 @@ def create_transaction(payload: TransactionCreate, request: Request):
     row = conn.execute(
         """
         SELECT
-          transaction_fact_pk, customer_id, booking_id, trip_ts,
+          transaction_id, customer_id, booking_id, trip_ts,
           booking_value, ride_distance,
           booking_status, vehicle_type, payment_method,
           driver_rating, customer_rating, trip_undone_reason
-        FROM silver.transaction_fact
-        WHERE transaction_fact_pk = ?
+        FROM silver.TransactionFact
+        WHERE transaction_id = ?
         """,
-        [transaction_fact_pk],
+        [transaction_id],
     ).fetchone()
 
     if not row:
         raise HTTPException(status_code=500, detail="Insert succeeded but record not found.")
 
     return TransactionOut(
-        transaction_fact_pk=row[0],
+        transaction_id=row[0],
         customer_id=row[1],
         booking_id=row[2],
         trip_ts=row[3],
@@ -148,17 +146,17 @@ def read_transactions(
         raise HTTPException(status_code=422, detail="booking_id alone is not valid. Provide customer_id as well.")
 
     db = request.app.state.db
-    conn = db.c()
+    conn = db.get_connection()
 
     if booking_id is None:
         rows = conn.execute(
             """
             SELECT
-              transaction_fact_pk, customer_id, booking_id, trip_ts,
+              transaction_id, customer_id, booking_id, trip_ts,
               booking_value, ride_distance,
               booking_status, vehicle_type, payment_method,
               driver_rating, customer_rating, trip_undone_reason
-            FROM silver.transaction_fact
+            FROM silver.TransactionFact
             WHERE customer_id = ?
             ORDER BY trip_ts DESC
             """,
@@ -169,19 +167,19 @@ def read_transactions(
         rows = conn.execute(
             """
             SELECT
-              transaction_fact_pk, customer_id, booking_id, trip_ts,
+              transaction_id, customer_id, booking_id, trip_ts,
               booking_value, ride_distance,
               booking_status, vehicle_type, payment_method,
               driver_rating, customer_rating, trip_undone_reason
-            FROM silver.transaction_fact
-            WHERE transaction_fact_pk = ?
+            FROM silver.TransactionFact
+            WHERE transaction_id = ?
             """,
             [pk],
         ).fetchall()
 
     return [
         TransactionOut(
-            transaction_fact_pk=r[0],
+            transaction_id=r[0],
             customer_id=r[1],
             booking_id=r[2],
             trip_ts=r[3],
@@ -218,7 +216,7 @@ def update_transaction(
         raise HTTPException(status_code=422, detail="No fields provided for update.")
 
     db = request.app.state.db
-    conn = db.c()
+    conn = db.get_connection()
     settings = request.app.state.settings
 
     pk = f"{customer_id}|{booking_id}"
@@ -226,12 +224,12 @@ def update_transaction(
     existing = conn.execute(
         """
         SELECT
-          transaction_fact_pk, customer_id, booking_id, trip_ts,
+          transaction_id, customer_id, booking_id, trip_ts,
           booking_value, ride_distance,
           booking_status, vehicle_type, payment_method,
           driver_rating, customer_rating, trip_undone_reason
-        FROM silver.transaction_fact
-        WHERE transaction_fact_pk = ?
+        FROM silver.TransactionFact
+        WHERE transaction_id = ?
         """,
         [pk],
     ).fetchone()
@@ -294,9 +292,9 @@ def update_transaction(
     try:
         conn.execute(
             f"""
-            UPDATE silver.transaction_fact
+            UPDATE silver.TransactionFact
             SET {", ".join(set_clauses)}
-            WHERE transaction_fact_pk = ?
+            WHERE transaction_id = ?
             """,
             params,
         )
@@ -306,18 +304,18 @@ def update_transaction(
     row = conn.execute(
         """
         SELECT
-          transaction_fact_pk, customer_id, booking_id, trip_ts,
+          transaction_id, customer_id, booking_id, trip_ts,
           booking_value, ride_distance,
           booking_status, vehicle_type, payment_method,
           driver_rating, customer_rating, trip_undone_reason
-        FROM silver.transaction_fact
-        WHERE transaction_fact_pk = ?
+        FROM silver.TransactionFact
+        WHERE transaction_id = ?
         """,
         [pk],
     ).fetchone()
 
     return TransactionOut(
-        transaction_fact_pk=row[0],
+        transaction_id=row[0],
         customer_id=row[1],
         booking_id=row[2],
         trip_ts=row[3],
@@ -352,27 +350,27 @@ def delete_transactions(
         raise HTTPException(status_code=422, detail="booking_id alone is not valid. Provide customer_id as well.")
 
     db = request.app.state.db
-    conn = db.c()
+    conn = db.get_connection()
 
     if booking_id is None:
         # count first
         cnt = conn.execute(
-            "SELECT count(*) FROM silver.transaction_fact WHERE customer_id = ?",
+            "SELECT count(*) FROM silver.TransactionFact WHERE customer_id = ?",
             [customer_id],
         ).fetchone()[0]
         conn.execute(
-            "DELETE FROM silver.transaction_fact WHERE customer_id = ?",
+            "DELETE FROM silver.TransactionFact WHERE customer_id = ?",
             [customer_id],
         )
         return DeleteResult(deleted=int(cnt))
 
     pk = f"{customer_id}|{booking_id}"
     cnt = conn.execute(
-        "SELECT count(*) FROM silver.transaction_fact WHERE transaction_fact_pk = ?",
+        "SELECT count(*) FROM silver.TransactionFact WHERE transaction_id = ?",
         [pk],
     ).fetchone()[0]
     conn.execute(
-        "DELETE FROM silver.transaction_fact WHERE transaction_fact_pk = ?",
+        "DELETE FROM silver.TransactionFact WHERE transaction_id = ?",
         [pk],
     )
     return DeleteResult(deleted=int(cnt))

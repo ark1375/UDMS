@@ -69,7 +69,7 @@ class TransactionOut(BaseModel):
     """
     model_config = ConfigDict(from_attributes=True)
 
-    transaction_fact_pk: str
+    transaction_id: str
     customer_id: str
     booking_id: str
     trip_ts: datetime
