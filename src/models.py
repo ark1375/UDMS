@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Optional, Literal, Any, Dict, List 
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator
-
 
 BookingStatus = Literal["Completed", "Cancelled by Customer", "Cancelled by Driver", "Incomplete", "No Driver Found"]
 
@@ -87,3 +86,15 @@ class TransactionOut(BaseModel):
 
 class DeleteResult(BaseModel):
     deleted: int
+
+
+class TextQueryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(..., min_length=1, description="Natural language database question.")
+
+
+class TextQueryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sql: str = Field(..., description="Generated SQL that was executed (always SELECT ... LIMIT 10).")
+    columns: List[str]
+    rows: List[Dict[str, Any]]

@@ -6,7 +6,8 @@ from fastapi import FastAPI
 from .settings import Settings
 from .db import DuckDB
 from .transactions import router as transactions_router
-
+from .textquery_router import router as textquery_router
+from .textquery_ai import TextToSQLService
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -20,6 +21,8 @@ async def lifespan(app: FastAPI):
     app.state.settings = settings
     app.state.db = db
 
+    app.ttss = TextToSQLService(model_name=settings.model_name , api_key=settings.openai_key)
+
     try:
         yield
     finally:
@@ -29,6 +32,7 @@ async def lifespan(app: FastAPI):
 def create_app() -> FastAPI:
     app = FastAPI(title="Analytics CRUD API", version="1.0.0", lifespan=lifespan)
     app.include_router(transactions_router, prefix="/api/v1")
+    app.include_router(textquery_router, prefix="/api/v1")
     return app
 
 

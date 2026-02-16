@@ -11,12 +11,12 @@ from pydantic import Field
 
 class TestSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
-    test_url: str = Field(..., alias="TEST_URL")
+    api_url: str = Field(..., alias="API_URL")
 
 
 def _base_url() -> str:
     s = TestSettings()
-    return s.test_url.rstrip("/")
+    return s.api_url.rstrip("/")
 
 
 def _endpoint(path: str) -> str:
