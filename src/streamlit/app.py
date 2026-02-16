@@ -11,11 +11,6 @@ import altair as alt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 
-
-# =========================
-# 1) Settings via .env
-# =========================
-# We use pydantic-settings so you can keep configuration outside code (like your FastAPI setup).
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
     duckdb_path: str = Field(..., alias="DUCKDB_PATH")
@@ -23,53 +18,36 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-
-# =========================
-# 2) Streamlit page config
-# =========================
 st.set_page_config(
     page_title="Trips Analytics Dashboard",
     layout="wide",
 )
 
-
-st.title("🚗 Trips Analytics Dashboard (DuckDB + dbt Medallion)")
+st.title("Trips Analytics Dashboard")
 st.caption("Data sources: silver.TransactionFact + gold.travels + gold.requests")
 
 
-# =========================
-# 3) Create DB connection ONCE
-# =========================
-# Streamlit reruns the script on every interaction, so we cache the connection.
+# Create DB connection
+# Streamlit reruns the script on every interaction - cache the connection.
 # This prevents reconnecting on every filter change.
 @st.cache_resource
 def get_conn(path: str) -> duckdb.DuckDBPyConnection:
     conn = duckdb.connect(path, read_only=True)
-    # If you store local timestamps, you may want to set timezone policy. Adjust if needed.
     conn.execute("SET timezone='UTC';")
     return conn
 
 
 conn = get_conn(settings.duckdb_path)
 
-
-# =========================
-# 4) Helper to run SQL -> DataFrame
-# =========================
+# Helper to run SQL -> DataFrame
 def qdf(sql: str, params: Optional[list] = None) -> pd.DataFrame:
     if params is None:
         params = []
     return conn.execute(sql, params).fetchdf()
 
 
-# =========================
-# 5) Sidebar filters (interactive controls)
-# =========================
-# You asked:
-# - filter by timestamps [Time delta]
-# - filter by vehicle type
-#
-# Time delta approach: pick "Last N days/hours" -> we compute a cutoff timestamp and filter trip_ts >= cutoff
+
+# Sidebar filters (interactive controls)
 st.sidebar.header("Filters")
 
 time_window = st.sidebar.selectbox(
@@ -84,16 +62,16 @@ time_window = st.sidebar.selectbox(
     index=1,
 )
 
-now = datetime.utcnow()
+end_of_year = datetime.fromisoformat('2025-01-01 00:00:00')
 
 if time_window == "Last 24 hours":
-    cutoff_ts = now - timedelta(hours=24)
+    cutoff_ts = end_of_year - timedelta(hours=24)
 elif time_window == "Last 7 days":
-    cutoff_ts = now - timedelta(days=7)
+    cutoff_ts = end_of_year - timedelta(days=7)
 elif time_window == "Last 30 days":
-    cutoff_ts = now - timedelta(days=30)
+    cutoff_ts = end_of_year - timedelta(days=30)
 elif time_window == "Last 90 days":
-    cutoff_ts = now - timedelta(days=90)
+    cutoff_ts = end_of_year - timedelta(days=90)
 else:
     cutoff_ts = None  # means "no time filter"
 
@@ -119,20 +97,14 @@ if not selected_vehicles:
     st.sidebar.warning("No vehicle types selected — dashboard will show no data.")
 
 
-# =========================
-# 6) Build reusable WHERE clause
-# =========================
+# reusable WHERE clause
 # We need one consistent filter logic used across KPIs and charts.
 # We'll filter by:
 # - trip_ts >= cutoff_ts (if cutoff_ts is not None)
 # - vehicle_type IN selected_vehicles
-#
-# NOTE: gold tables should also contain vehicle_type + trip_ts if built from silver.
-# If your gold models did NOT include those columns, adjust queries to join back to silver by PK.
 def build_filters(table_alias: str = ""):
     """
     Returns (where_sql, params) for consistent filters.
-    table_alias: optional prefix like "s." or "t."
     """
     prefix = f"{table_alias}." if table_alias else ""
     clauses = []
@@ -154,20 +126,7 @@ def build_filters(table_alias: str = ""):
     return where_sql, params
 
 
-# =========================
-# 7) KPI queries
-# =========================
-# You asked:
-# a) number of all the bookings --> count(*) on silver
-# b) Successful trips --> gold.travels
-# c) Total income --> gold.travels sum on pay (we’ll assume column is booking_value)
-# d) success rate --> travels / (requests + travels)
-#
-# Important assumption:
-# - gold.travels has booking_value, trip_ts, vehicle_type
-# - gold.requests has trip_ts, vehicle_type, booking_status
-#
-# If your gold models don’t carry trip_ts/vehicle_type, tell me and we’ll join from silver using PK.
+# KPI queries
 silver_where, silver_params = build_filters("")
 travels_where, travels_params = build_filters("")
 requests_where, requests_params = build_filters("")
@@ -200,9 +159,6 @@ denom = successful_trips + requests_count
 success_rate = (successful_trips / denom) if denom > 0 else 0.0
 
 
-# =========================
-# 8) Render KPI cards
-# =========================
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("All bookings (Silver)", f"{all_bookings:,}")
 k2.metric("Successful trips (Gold Travels)", f"{successful_trips:,}")
@@ -213,11 +169,8 @@ k4.metric("Success rate", f"{success_rate*100:.2f}%")
 st.divider()
 
 
-# =========================
-# 9) Pie chart: distribution of unsuccessful trip types
-# =========================
-# “unsuccessful trip types” = booking_status in gold.requests
-# We count by booking_status (Cancelled by Customer/Driver, Incomplete, No Driver Found, etc.)
+# Pie chart: distribution of unsuccessful trip types
+
 requests_breakdown = qdf(
     f"""
     SELECT
@@ -254,10 +207,49 @@ with right:
     st.subheader("Requests table (filtered)")
     st.dataframe(requests_breakdown, use_container_width=True)
 
+st.divider()
 
-# =========================
-# 10) Bar chart: successful trips per vehicle + avg driver/customer rating
-# =========================
+# Pie chart: distribution of payment methods
+
+requests_breakdown = qdf(
+    f"""
+    SELECT
+      payment_method,
+      COUNT(*) AS n
+    FROM gold.travels
+    {requests_where}
+    GROUP BY 1
+    ORDER BY n DESC
+    """,
+    requests_params,
+)
+
+left, right = st.columns([1, 1])
+
+with left:
+    st.subheader("Payment Methods for Travels")
+    if requests_breakdown.empty:
+        st.info("No request records found for the selected filters.")
+    else:
+        pie = (
+            alt.Chart(requests_breakdown)
+            .mark_arc()
+            .encode(
+                theta=alt.Theta("n:Q"),
+                color=alt.Color("payment_method:N", legend=alt.Legend(title="Type")),
+                tooltip=["payment_method:N", "n:Q"],
+            )
+            .properties(height=320)
+        )
+        st.altair_chart(pie, use_container_width=True)
+
+with right:
+    st.subheader("Payment Method (filtered)")
+    st.dataframe(requests_breakdown, use_container_width=True)
+
+st.divider()
+
+# Bar chart: successful trips per vehicle + avg driver/customer rating
 # Using gold.travels (successful only)
 travels_by_vehicle = qdf(
     f"""
@@ -319,29 +311,18 @@ else:
 st.divider()
 
 
-# =========================
-# 11) Line chart: trips per hour grouped by day (high traffic)
-# =========================
-# You said: "all requests. Use silver layer"
-# I interpret that as NON-COMPLETED bookings, but we query from silver.
-# (Equivalent to gold.requests, but using silver as requested.)
-#
-# We group by:
-# - day (date(trip_ts))
-# - hour (extract hour)
+# Line chart: trips per hour grouped by day (high traffic)
 traffic_where, traffic_params = build_filters("s")
 
 traffic = qdf(
     f"""
     SELECT
-      CAST(date_trunc('day', s.trip_ts) AS DATE) AS trip_day,
       EXTRACT('hour' FROM s.trip_ts) AS trip_hour,
       COUNT(*) AS trips
     FROM silver.TransactionFact s
     {traffic_where}
-      {"AND" if traffic_where else "WHERE"} s.booking_status != 'Completed'
-    GROUP BY 1, 2
-    ORDER BY 1, 2
+    GROUP BY 1
+    ORDER BY 1
     """,
     traffic_params,
 )
@@ -351,14 +332,11 @@ st.subheader("High traffic hours (Requests only, Silver layer)")
 if traffic.empty:
     st.info("No request trips found for the selected filters.")
 else:
-    # Make an x-axis timestamp for hour buckets (day + hour) for a clean line plot
-    traffic["bucket_ts"] = pd.to_datetime(traffic["trip_day"]) + pd.to_timedelta(traffic["trip_hour"], unit="h")
-
     line = (
         alt.Chart(traffic)
         .mark_line()
         .encode(
-            x=alt.X("bucket_ts:T", title="Day + Hour"),
+            x=alt.X("trip_hour:Q", title="Hour"),
             y=alt.Y("trips:Q", title="Trips (requests)"),
             tooltip=[
                 alt.Tooltip("trip_day:T", title="Day"),
@@ -371,10 +349,7 @@ else:
     st.altair_chart(line, use_container_width=True)
 
 
-# =========================
-# 12) Debug / transparency
-# =========================
-# Helps you verify filters are doing what you expect.
+# Debug / transparency
 with st.expander("Show active filters"):
     st.write("Time window:", time_window)
     st.write("Cutoff timestamp (UTC):", cutoff_ts)
