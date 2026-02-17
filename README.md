@@ -1,5 +1,9 @@
 # Uber Data Managment System
 
+## Important
+For recreating the project, make sure that the `.csv` file is available at the following path:
+- `{project_root}/analytics/seeds/bronze/transaction.csv`
+
 ## The EDA Section
 
 For gaining a better understanding of the data before doing any coding, a simple EDA was performed.

@@ -129,7 +129,9 @@ Thumbs.db
 
 *.sqlite3
 *.db
+*.duckdb
 *.csv
+db/
 # ==============================
 # Temporary files
 # ==============================
