@@ -110,11 +110,6 @@ Some important notes:
   * `poetry run pytest tests/test_transaction_sequential.py`
   * This test suite is **sequential**, meaning that operations are executed in a specific order and later assertions depend on the results of earlier operations.
 
-
-Below is the **edited and polished version** of your section.
-The **layout, header hierarchy, code blocks, and overall structure are fully preserved**.
-Edits focus on grammar, clarity, technical precision, and tightening the explanation—without changing intent.
-
 ---
 
 ## Indexing
