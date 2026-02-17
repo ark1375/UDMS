@@ -1,65 +1,110 @@
 # Uber Data Managment System
 
 ## The EDA Section
-For gainging a better understanding of the data before doing any coding, a simple EDA has been perfomer.  
+
+For gaining a better understanding of the data before doing any coding, a simple EDA was performed.
 This EDA is available [here](./notebooks/Basic_Analysis.ipynb).
-Details of the findings in this section can be read in the notebook itself.  
-However some key notes for desigining the reset of the system needs emphasizing:
-- The dataset is NOT clean.
-- The dataset does not have a unique identifier.
-- Combination of some fields (like creating a timestamp) is possible.
-- There are various `null` values present in the dataset which is semanticaly correct but dirty.
-- The `null` values are represented by the string __null__ and not an empty space. 
+
+Details of the findings in this section can be read in the notebook itself.
+However, some key notes for designing the rest of the system need to be emphasized:
+
+* The dataset is **not clean**.
+* The dataset does **not** have a unique identifier.
+* A combination of some fields (for example, creating a timestamp) is possible.
+* There are various `null` values present in the dataset which are **semantically correct**, but still considered dirty.
+* The `null` values are represented by the string **`null`**, not as actual SQL `NULL` values or empty fields.
+
+---
 
 ## The Medalion Architecture
-For the database, I choosed DuckDB because it is localized (meaning no seperate process needs to be running) and it can be integrated with Python seamlessly.
-I used DBT to create the medalion architecture as I had experience of using it before.  
-DBT [some explaination tops one paragraph about what DBT is].
-The dataset will be imported AS IS using the __seed__ mechanisim that DBT provides for us.  
-This seed will be recognized as the firs __Bronze__ layer.
+
+For the database, I chose **DuckDB** because it is localized (meaning no separate process needs to be running) and can be integrated with Python seamlessly.
+
+I used **DBT** to create the medallion architecture, as I had prior experience using it.
+DBT is a transformation framework that allows analytics engineers to define data transformations as code, enforce schemas, document models, and manage data pipelines directly within the data warehouse.
+
+The dataset is imported **as-is** using the **seed** mechanism that DBT provides.
+This seed is recognized as the first **Bronze** layer.
+
 #### The controversial Choice
-For the next __Silver__ layer, what I did differs from what it is asked for in the project description. The implemented __Silver__ layer, is a clean version of the __Bronze__ layer imported as raw CSV file.  
-The table __TransactionFact__ holds all the records from the original dataset with the addition of the following:
-- Primary key is defined on it as the combination (concatenation) of __CustomerID__ and __BookingID__.
-- Timestamp is created using a combination of Date and Time column and the coresponding columns are droped.
-- The _one hot encoding_ feature types for cancelation is droped (as it can be easly recreated with a simple query).
-- The reasons for cancelation are combined into one column.
-This choice is because that the comman desing of the mdealion architecture follows the bellow pattern:
-- Bronze: Raw data
-- Silver: Cleaned Data with structured Schema
-- Gold: Insight tables for better undestanding the business.
+
+For the next **Silver** layer, the implementation differs slightly from what is asked for in the project description.
+
+The implemented **Silver** layer is a cleaned and structured version of the **Bronze** layer, which was imported as a raw CSV file.
+The table **`TransactionFact`** holds all records from the original dataset with the following additions and transformations:
+
+* A primary key is defined as a combination (concatenation) of **CustomerID** and **BookingID**.
+* A unified timestamp is created by combining the Date and Time columns, and the original columns are dropped.
+* One-hot-encoded columns representing cancellation types are dropped, as they can be easily recreated using simple SQL queries.
+* Cancellation reasons are consolidated into a single column.
+
+This choice follows the commonly accepted medallion architecture pattern:
+
+* **Bronze**: Raw data
+* **Silver**: Cleaned data with a structured schema
+* **Gold**: Aggregated or domain-specific tables for business understanding
+
+---
 
 #### The Gold Layer
-Usually the gold layer holds data for gaining easy access to data with business insights. But since the dataset is small here, we just seperated the Request table (which holds all the rides which was canceled) and Travels table (all compleeted rides).
 
-### The Choice of Columns 
-- Timestamp was created because holding Time and Date in seperate columns creates no real value for us and it increases the overhead as TIME and DATE are instances of Timestamps in many databases. So, instead of using two timestamps, we combined it into one.
-  - Later on, the DATE section and the TIME section can be truncated simply using SQL commands.
-- As I mentioned before, the `one-hot-encoding` columns which hold the cancelation type is again an overhead and can be removed easily. No real value here.  
-- 
+Typically, the Gold layer holds data optimized for business insights and analytics.
+However, since the dataset is relatively small, the Gold layer is implemented by separating the data into two domain-specific tables:
+
+* **Requests**: Contains all rides that were canceled.
+* **Travels**: Contains all completed rides.
+
+This separation improves semantic clarity and reduces unnecessary null values.
+
+---
+
+### The Choice of Columns
+
+* A unified timestamp was created because holding Date and Time in separate columns provides no real value and increases overhead. In many databases, DATE and TIME are already represented as parts of a TIMESTAMP.
+
+  * When needed, the DATE or TIME components can easily be extracted using SQL functions.
+* As mentioned earlier, one-hot-encoded cancellation-type columns introduce unnecessary overhead and can be reconstructed dynamically when required. They do not add meaningful long-term value and were therefore removed.
+
+---
+
 #### About the `null` values in the dataset.
-When analyzed, we saw that many `null` values hold semantic and logical meaning. For example, when a ride is canceled, there is no meaning for __Driver Rating__ or __Payment Method__ as they are entities related to a ride that is completed.  
-Most of the null values within the dataset fall under this category.
-- One solution to mitigate the excess of null values is the same solution that we implemented for the gold layer. That is __Sperate the entites of Travel and Requests__. This removes many instances of null values related to the __Request__ entity as some of the columns holds almost no meaning to this table.
-- The same goes for the `Customer Rating` and `Driver Rating` columns. They are mostly empty when there is an uncompleted ride. So again, these null values do not mean __Curopted Data__. Its just a logical consequence of business logic.
-- Customer Rating and Driver Rating is only relavent to `Travels` table. Hence, it can be removed from the `Requests` table.
-  
+
+During analysis, it became clear that many `null` values have semantic and logical meaning rather than indicating corrupted data.
+
+For example, when a ride is canceled, fields such as **Driver Rating** or **Payment Method** are not applicable, as they only relate to completed rides.
+Most null values in the dataset fall into this category.
+
+* One approach to mitigating excessive null values is the same solution implemented in the Gold layer: **separating the entities of Travels and Requests**.
+  This removes many null fields from the Requests table, where those attributes have no semantic meaning.
+* The same logic applies to **Customer Rating** and **Driver Rating**, which are largely empty for uncompleted rides. These null values do not indicate bad data, but rather reflect valid business logic.
+* Since Customer Rating and Driver Rating are only relevant for completed rides, they are retained exclusively in the **Travels** table and removed from **Requests**.
+
+---
+
 ## The CRUD API
-Using FastAPI we created a CRUD endpoint. This endpoint is present under `/api/v1` end point and it includes direct HTTP methods.
-- Main endpoint is `/api/v1/transactions`
-- Methods that can be used are:
-  - GET for Read operation
-  - POST for Create operation
-  - PATCH for Update operation
-  - DELETE for Delete operation
-- Documents are avilable at `/docs`
+
+Using **FastAPI**, a CRUD API was implemented.
+The API is available under the `/api/v1` endpoint and exposes standard HTTP methods.
+
+* Main endpoint: `/api/v1/transactions`
+* Supported methods:
+
+  * **GET** for Read operations
+  * **POST** for Create operations
+  * **PATCH** for Update operations
+  * **DELETE** for Delete operations
+* Interactive API documentation is available at `/docs`
 
 Some important notes:
-- The Booking ID is created automaticaly with a random function each time a create request is sent.
-- The unique identifier in the database are: CustomerID + BookingID. So this is needed for Update, Delete and Read requests.
-- When a new record is to be created, some values are mandetory and some are optional (avilable in docs).
-- Tests has been written and can be ran using the following commands:
-  - `poetry run pytest tests/test_transaction_sequential.py`
+
+* **BookingID** is generated automatically using a random function each time a create request is sent.
+* The unique identifier in the database is a composite key: **CustomerID + BookingID**.
+  This composite key is required for Read, Update, and Delete operations.
+* When creating a new record, some fields are mandatory while others are optional. These constraints are documented in the API schema.
+* Tests have been written and can be executed using the following command:
+
+  * `poetry run pytest tests/test_transaction_sequential.py`
+  * This test suite is **sequential**, meaning that operations are executed in a specific order and later assertions depend on the results of earlier operations.
 
 ## Commands
 ### Important DBT Commands (DuckDB Project)
