@@ -106,6 +106,158 @@ Some important notes:
   * `poetry run pytest tests/test_transaction_sequential.py`
   * This test suite is **sequential**, meaning that operations are executed in a specific order and later assertions depend on the results of earlier operations.
 
+
+Below is the **edited and polished version** of your section.
+The **layout, header hierarchy, code blocks, and overall structure are fully preserved**.
+Edits focus on grammar, clarity, technical precision, and tightening the explanation—without changing intent.
+
+---
+
+## Indexing
+
+For indexing, a representative query was first designed to put a realistic analytical load on the dataset.
+The query is as follows:
+
+```sql
+EXPLAIN ANALYZE
+WITH base AS (
+    SELECT
+        transaction_id,
+        customer_id,
+        booking_id,
+        trip_ts,
+        vehicle_type,
+        booking_status,
+        payment_method,
+        booking_value,
+        ride_distance,
+        driver_rating,
+        customer_rating
+    FROM silver.TransactionFact
+    WHERE trip_ts IS NOT NULL
+      AND vehicle_type IS NOT NULL
+      AND booking_status = 'Completed'
+      AND ride_distance > 0
+      AND booking_value >= 10
+      AND trip_ts >= TIMESTAMP '2024-09-01 00:00:00'
+      AND trip_ts <  TIMESTAMP '2025-01-01 00:00:00'
+      AND vehicle_type IN ('Go Sedan', 'Auto')
+),
+pairs AS (
+    SELECT
+        a.vehicle_type,
+        date_trunc('hour', a.trip_ts) AS hour_bucket,
+        a.payment_method,
+        COUNT(*) AS pair_rows,
+        COUNT(DISTINCT a.transaction_id) AS a_rides,
+        COUNT(DISTINCT b.transaction_id) AS b_rides,
+        COUNT(DISTINCT a.customer_id) AS uniq_customers_in_a,
+        AVG(a.booking_value) AS avg_value_a,
+        AVG(b.booking_value) AS avg_value_b,
+        AVG(a.driver_rating) AS avg_driver_rating_a,
+        AVG(a.customer_rating) AS avg_customer_rating_a,
+        AVG(ABS(epoch(a.trip_ts) - epoch(b.trip_ts))) AS avg_time_diff_seconds
+    FROM base a
+    JOIN base b
+      ON a.vehicle_type = b.vehicle_type 
+      	AND a.transaction_id <> b.transaction_id
+		AND b.trip_ts BETWEEN a.trip_ts - INTERVAL '3 MINUTE' AND a.trip_ts + INTERVAL '3 MINUTE'
+		AND ABS(a.booking_value - b.booking_value) <= 10
+		GROUP BY 1,2,3
+)
+SELECT *
+FROM pairs
+ORDER BY pair_rows DESC, avg_time_diff_seconds ASC;
+```
+
+This query analyzes **clusters of similar completed trips** occurring within short time windows.
+
+First, the `base` CTE filters `silver.TransactionFact` to include only valid, completed rides between **September 1, 2024 and January 1, 2025**.
+The dataset is further restricted to the vehicle types *“Go Sedan”* and *“Auto”*, with non-null timestamps and vehicle types, positive ride distances, and booking values greater than or equal to 10.
+
+Next, the `pairs` CTE performs a self-join on this filtered dataset to identify **pairs of distinct trips with the same vehicle type** that:
+
+* Occurred within **±3 minutes** of each other
+* Have booking values differing by no more than 10
+
+For each combination of vehicle type, hourly time bucket (trip timestamp truncated to the hour), and payment method, the query computes:
+
+* The number of matching trip pairs
+* Distinct ride counts from each side of the join
+* The number of unique customers
+* Average booking values
+* Average driver and customer ratings
+* Average time difference between paired trips (in seconds)
+
+Finally, the result set is ordered by the highest number of paired trips (`pair_rows`) and then by the smallest average time difference.
+This effectively highlights periods where similar rides occurred close together in both time and value, representing a computationally expensive analytical workload.
+
+### The Index
+Indexing is applied for query optimization using the following command:
+
+```sql
+CREATE INDEX IF NOT EXISTS tf_idx_vehicle_status_ts 
+ON silver.TransactionFact (vehicle_type, booking_status, trip_ts);
+```
+
+This index is suitable because it aligns directly with the query’s **most selective filtering columns and join conditions**.
+
+The query applies filters on:
+
+* `vehicle_type`
+* `booking_status = 'Completed'`
+* `trip_ts` constrained to a date range
+
+By creating a composite index in the following order:
+
+```sql
+(vehicle_type, booking_status, trip_ts)
+```
+
+the database can:
+
+1. **Quickly narrow the search space by vehicle type**, which provides an initial high-level partitioning.
+2. Apply the equality filter on `booking_status`.
+3. Efficiently perform a **range scan on `trip_ts`**, which is most effective when the range column appears last in the index definition.
+
+Because `trip_ts` is used both in a **date range filter** and in the ±3-minute window condition of the self-join, placing it last enables efficient range-based access after the equality filters are resolved.
+
+### Important Note
+As heavy as the query might look, because DuckDB is a columnar DB, it can run these sort of queries very efficently. Generaly, columnar databases are more suitable for aggregate SQL commands.  
+Because of this reason, __no significant improvment__ was observed during the various runs of the query comparing before and after indexing.  
+However, column oriented databases are not good at retriving __multiple columns__ for a single instance. For this purpose, and for the effect of Indexing to kick in, the following query was designed:
+
+```sql
+EXPLAIN ANALYZE
+SELECT
+    transaction_id,
+    customer_id,
+    booking_id,
+    trip_ts,
+    vehicle_type,
+    payment_method,
+    booking_status,
+    booking_value,
+    ride_distance,
+    driver_rating,
+    customer_rating,
+    booking_value / ride_distance AS revenue_per_distance,
+    date_trunc('hour', trip_ts) AS trip_hour
+FROM silver.TransactionFact
+WHERE
+    booking_status = 'Completed'
+    AND (trip_ts >= TIMESTAMP '2024-05-06 09:00:00' AND trip_ts <  TIMESTAMP '2024-05-06 10:00:00')
+    AND vehicle_type = 'Auto'
+LIMIT 10;
+```
+
+This query is heavy on the filters and returns multiple columns (so higher projections).
+
+#### Unfortunatly
+Unfortunatly, I was unable to activated the effects of Indexing as DuckDB keept using Sequential Scans when the query plan was checked. This is probably due to the relativly small size of the database (less than 200k records).  
+- More investigation is indeed needed. 
+
+
 ## Commands
 ### Important DBT Commands (DuckDB Project)
 
